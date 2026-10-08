@@ -11,10 +11,6 @@ python start.py
 
 页面地址为 `http://127.0.0.1:7860/`。
 
-## GitHub Pages
-
-`static/index.html` 是不依赖后端的手动测试版本，归因计算和指纹库读取都在浏览器本地完成。仓库附带的 GitHub Actions 会将 `static/` 部署到 GitHub Pages。
-
 ## 使用
 
 - **手动测试**：复制三条挑战，分别发送给同一个待测模型，再粘贴每次完整输出。
