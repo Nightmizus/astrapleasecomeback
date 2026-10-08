@@ -11,6 +11,11 @@ from flask import Flask, jsonify, render_template, request
 from enrollment import bank_summary, enroll_automatic, request_completion, test_automatic
 from fingerprint import analyze_global_outputs, generate_challenges, load_bank, parse_numbers
 from bank_builder import build_bank, read_rows
+import threading
+
+import claude_runner
+import codex_runner
+import monitor
 
 
 app = Flask(__name__)
@@ -105,6 +110,7 @@ def rebuild_global_bank() -> dict:
 
 
 unified_bank = load_bank(UNIFIED_BANK_FILE) if UNIFIED_BANK_FILE.exists() else None
+monitor.start_monitor(unified_bank)
 if unified_bank is None:
     rebuild_global_bank()
 
@@ -228,6 +234,84 @@ def automatic_test_probe():
         return jsonify({"error": str(error)}), 502
 
 
+def run_cli_probe(runner, run_challenge, tool_label: str, payload: dict) -> tuple[dict, int]:
+    """Codex / Claude 一键检测共用的单次挑战执行逻辑：快照 → 会话 → 清理 → 校验。"""
+    model = str(payload.get("model") or "").strip()
+    if not model:
+        return {"error": f"请先选择 {tool_label} 使用的模型。"}, 400
+    prompt = str(payload.get("prompt") or "")
+    if not prompt:
+        return {"error": "缺少挑战提示词。"}, 400
+    snapshot = runner.snapshot_session_files()
+    deleted_sessions: list[str] = []
+    try:
+        text = run_challenge(prompt, model)
+    except RuntimeError as error:
+        return {"error": str(error)}, 502
+    finally:
+        deleted_sessions = runner.delete_new_sessions(snapshot)
+    parsed = parse_numbers(text)
+    expected_count = int(payload.get("expected_count") or 0)
+    minimum_numbers = max(80, math.ceil(expected_count * 0.55))
+    return {
+        "model": model,
+        "text": text,
+        "parsed_numbers": len(parsed),
+        "minimum_numbers": minimum_numbers,
+        "accepted": len(parsed) >= minimum_numbers,
+        "deleted_sessions": deleted_sessions,
+    }, 200
+
+
+@app.get("/api/codex/status")
+def codex_status():
+    return jsonify(codex_runner.codex_status())
+
+
+@app.post("/api/codex/probe")
+def codex_probe():
+    payload = request.get_json(silent=True) or {}
+    body, status_code = run_cli_probe(codex_runner, codex_runner.run_codex_challenge, "Codex", payload)
+    return jsonify(body), status_code
+
+
+@app.get("/api/claude/status")
+def claude_status():
+    return jsonify(claude_runner.claude_status())
+
+
+@app.post("/api/claude/probe")
+def claude_probe():
+    payload = request.get_json(silent=True) or {}
+    body, status_code = run_cli_probe(claude_runner, claude_runner.run_claude_challenge, "Claude", payload)
+    return jsonify(body), status_code
+
+
+@app.get("/monitor")
+def monitor_page():
+    return render_template("monitor.html")
+
+
+@app.get("/api/monitor/history")
+def monitor_history():
+    return jsonify(monitor.history_payload())
+
+
+@app.post("/api/monitor/run")
+def monitor_run():
+    if monitor.is_running():
+        return jsonify({"error": "已有一个检测正在运行，请稍候。"}), 409
+
+    def task() -> None:
+        try:
+            monitor.run_monitor_check("manual")
+        except RuntimeError as error:
+            print(f"[monitor] 手动检测失败：{error}", flush=True)
+
+    threading.Thread(target=task, daemon=True, name="modeltrace-monitor-run").start()
+    return jsonify({"started": True}), 202
+
+
 @app.get("/api/bank")
 def get_bank():
     try:
@@ -298,4 +382,10 @@ def automatic_enrollment():
 
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=7860, debug=False)
+    import os
+
+    app.run(
+        host=os.environ.get("MODELTRACE_HOST") or "0.0.0.0",
+        port=int(os.environ.get("MODELTRACE_PORT") or 7860),
+        debug=False,
+    )

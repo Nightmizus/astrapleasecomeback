@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>定时检测 · ModelTrace</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='monitor.css') }}">
+</head>
+<body>
+  <header class="monitor-header">
+    <div>
+      <h1>Codex 定时检测 <span class="model-chip">gpt-6-astra</span></h1>
+      <p id="schedule-line">东八区每天 07:00 / 12:00 / 17:00 自动执行指纹归因检测</p>
+    </div>
+    <nav><a href="/">&larr; 返回检测台</a></nav>
+  </header>
+
+  <main class="monitor-main">
+    <section class="stat-grid">
+      <div class="stat-card"><span class="stat-label">最新状态</span><strong id="stat-latest">—</strong></div>
+      <div class="stat-card"><span class="stat-label">下次自动检测</span><strong id="stat-next">—</strong></div>
+      <div class="stat-card"><span class="stat-label">累计检测</span><strong id="stat-total">—</strong></div>
+      <div class="stat-card"><span class="stat-label">Astra 正常占比</span><strong id="stat-rate">—</strong></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>检测历史</h2>
+        <div class="legend">
+          <span class="legend-item"><i class="sq ok"></i>归因为 astra</span>
+          <span class="legend-item"><i class="sq bad"></i>异常（非 astra / 数字不足 / 失败）</span>
+          <span class="legend-note">横向为天（最新在右），纵向为小时（东八区）</span>
+        </div>
+        <button id="run-now" type="button">立即检测一次</button>
+      </div>
+      <p id="run-message" class="run-message"></p>
+      <div id="heat-wrap" class="heat-wrap"><div id="heat-grid" class="heat-grid"></div></div>
+      <p id="empty-hint" class="empty-hint" hidden>还没有检测记录：可点击右上角「立即检测一次」，或等待下一个定时时点。</p>
+    </section>
+
+    <section class="panel">
+      <h2>最近异常记录</h2>
+      <table class="anomaly-table">
+        <thead>
+          <tr><th>时间</th><th>触发</th><th>状态</th><th>归因结果</th><th>概率</th><th>数字</th><th>耗时</th><th>说明</th></tr>
+        </thead>
+        <tbody id="anomaly-body"></tbody>
+      </table>
+      <p id="no-anomaly" class="empty-hint" hidden>暂无异常记录。</p>
+    </section>
+  </main>
+
+  <script src="{{ url_for('static', filename='monitor-app.js') }}"></script>
+</body>
+</html>

@@ -87,6 +87,9 @@ function renderResult(payload) {
   const apiNote = payload.api_test
     ? `<span>API 获得 ${payload.api_test.received}/${payload.api_test.requested} 份有效回答，实际尝试 ${payload.api_test.attempted}/${payload.api_test.max_attempts}${payload.api_test.errors.length ? `，${payload.api_test.errors.length} 次未采用` : ""}</span>`
     : "";
+  const cliNote = payload.cli_test
+    ? `<span>${escapeHtml(payload.cli_test.tool)} 一键检测：模型 ${escapeHtml(payload.cli_test.model)} · 获得 ${payload.cli_test.received}/${payload.cli_test.requested} 份有效回答 · 临时会话已清理</span>`
+    : "";
   byId("result").innerHTML = `
     <div class="result-summary">
       <div><span>最可能模型</span><strong>${escapeHtml(payload.prediction_name)}</strong></div>
@@ -96,10 +99,10 @@ function renderResult(payload) {
     </div>
     <div class="diagnostics">${diagnostics}</div>
     <div class="table-wrap"><table><thead><tr><th>排序</th><th>候选模型</th><th>家族</th><th>归因概率</th><th>分布相似度</th></tr></thead><tbody>${rows}</tbody></table></div>
-    ${apiNote ? `<div class="result-note">${apiNote}</div>` : ""}
+    ${apiNote || cliNote ? `<div class="result-note">${apiNote}${cliNote}</div>` : ""}
     <div class="result-guidance" role="note" aria-label="结果说明">
       <p>本工具仅对指纹库内的模型进行归因；若待测模型不在指纹库中，得到任何结果都有可能。</p>
-      <p>Claude Code 的系统提示词会影响模型偏好，测试结果存在较大偏差，建议不要在 Claude Code 中测试。</p>
+      <p>Claude 家族指纹采集自干净 API 环境；本页 Claude 一键检测已把 Claude Code 默认系统提示词替换为固定前缀以贴近采集条件，结果仍可能带有少量偏差。</p>
     </div>
   `;
   byId("result").hidden = false;
@@ -221,6 +224,177 @@ async function testViaApi(event) {
   button.disabled = false;
 }
 
+const oneClickTools = {
+  codex: {
+    label: "Codex",
+    statusUrl: "/api/codex/status",
+    probeUrl: "/api/codex/probe",
+    status: "codex-status", model: "codex-model", custom: "codex-model-custom", run: "codex-run",
+    form: "codex-test-form", panel: "codex-test-progress", heading: "codex-progress-status",
+    count: "codex-progress-count", fill: "codex-progress-fill", steps: "codex-progress-steps",
+    readyLine: (status, models) => `Codex 就绪：${status.version || "codex-cli"} · 已登录 · 可用模型 ${models.length} 个。检测将开启 3 个独立临时会话，结束后自动删除，不保留对话记录。`,
+  },
+  claude: {
+    label: "Claude",
+    statusUrl: "/api/claude/status",
+    probeUrl: "/api/claude/probe",
+    status: "claude-status", model: "claude-model", custom: "claude-model-custom", run: "claude-run",
+    form: "claude-test-form", panel: "claude-test-progress", heading: "claude-progress-status",
+    count: "claude-progress-count", fill: "claude-progress-fill", steps: "claude-progress-steps",
+    readyLine: (status, models) => `Claude 就绪：${status.version || "claude-cli"} · ${status.auth_status || "已登录"} · 候选模型 ${models.length} 个。检测将开启 3 个独立临时会话（系统提示词替换为固定前缀、禁用工具），结束后自动删除，不保留对话记录。`,
+  },
+};
+const oneClickLoaded = { codex: false, claude: false };
+
+function bankClaudeModels() {
+  return ((window.BANK_SUMMARIES.claude || {}).models || []).map((model) => ({ slug: model.id, display_name: model.display_name }));
+}
+
+async function loadOneClickStatus(key) {
+  const tool = oneClickTools[key];
+  const statusLine = byId(tool.status);
+  const select = byId(tool.model);
+  const button = byId(tool.run);
+  statusLine.textContent = `正在检测本机 ${tool.label} 环境……`;
+  statusLine.className = "cli-status";
+  try {
+    const response = await fetch(tool.statusUrl);
+    const status = await response.json();
+    oneClickLoaded[key] = true;
+    if (!status.installed) {
+      statusLine.textContent = `未检测到 ${key} 命令：请先安装 ${tool.label} CLI 并重新打开本页。`;
+      statusLine.className = "cli-status error";
+      return;
+    }
+    if (!status.logged_in) {
+      statusLine.textContent = `${tool.label} CLI ${status.version || ""} 已安装，但未检测到可用凭据（${status.auth_status || status.login_status || "无登录信息"}）。请先完成登录或 API 配置，然后刷新本页。`;
+      statusLine.className = "cli-status error";
+      return;
+    }
+    const models = (status.models || []).slice();
+    if (key === "claude") {
+      for (const model of bankClaudeModels()) {
+        if (!models.some((item) => item.slug === model.slug)) models.push(model);
+      }
+    }
+    if (status.default_model && !models.some((item) => item.slug === status.default_model)) {
+      models.unshift({ slug: status.default_model, display_name: "CLI 默认模型" });
+    }
+    if (models.length) {
+      select.innerHTML = models.map((model) => `<option value="${escapeHtml(model.slug)}"${model.slug === status.default_model ? " selected" : ""}>${escapeHtml(model.display_name)}（${escapeHtml(model.slug)}）</option>`).join("");
+    } else {
+      select.innerHTML = `<option value="">请输入自定义模型名</option>`;
+    }
+    button.disabled = false;
+    statusLine.textContent = tool.readyLine(status, models);
+    statusLine.className = "cli-status ok";
+  } catch (error) {
+    statusLine.textContent = `无法获取 ${tool.label} 状态：${error.message}`;
+    statusLine.className = "cli-status error";
+  }
+}
+
+function renderOneClickProgress(key, states, status) {
+  const tool = oneClickTools[key];
+  const valid = states.filter((state) => state === "done").length;
+  const target = 3;
+  byId(tool.panel).hidden = false;
+  byId(tool.heading).textContent = status;
+  byId(tool.count).textContent = `有效 ${valid}/${target}`;
+  byId(tool.fill).style.width = `${(valid / target) * 100}%`;
+  byId(tool.steps).innerHTML = states.map((state, index) => {
+    const labels = { pending: "等待", working: "会话进行中", done: "有效", invalid: "数字不足", error: "失败" };
+    return `<span class="progress-step ${state}"><b>${index + 1}</b>会话 ${index + 1} · ${labels[state] || state}</span>`;
+  }).join("");
+}
+
+async function runOneClickTest(key, event) {
+  event.preventDefault();
+  const tool = oneClickTools[key];
+  const button = event.currentTarget.querySelector("button[type=submit]");
+  const customModel = byId(tool.custom).value.trim();
+  const model = customModel || byId(tool.model).value;
+  if (!model) {
+    setMessage(byId("test-message"), `请先选择 ${tool.label} 使用的模型。`, "error");
+    return;
+  }
+  button.disabled = true;
+  byId("result").hidden = true;
+  setMessage(byId("test-message"), "");
+  byId(tool.model).disabled = true;
+  byId(tool.custom).disabled = true;
+
+  const challengeResponse = await fetch("/api/challenges");
+  const challenges = (await challengeResponse.json()).challenges.slice(0, 3);
+  const states = challenges.map(() => "pending");
+  const outputs = [];
+  const errors = [];
+  let currentStatus = "准备检测";
+  const startedAt = Date.now();
+  const progressTimer = window.setInterval(() => {
+    renderOneClickProgress(key, states, `${currentStatus} · 已等待 ${Math.floor((Date.now() - startedAt) / 1000)} 秒`);
+  }, 1000);
+  try {
+    for (let index = 0; index < challenges.length; index += 1) {
+      states[index] = "working";
+      currentStatus = `会话 ${index + 1}/${challenges.length} 进行中`;
+      renderOneClickProgress(key, states, currentStatus);
+      try {
+        const response = await fetch(tool.probeUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model,
+            prompt: challenges[index].prompt,
+            expected_count: challenges[index].expected_count,
+          }),
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || `${tool.label} 会话失败`);
+        if (payload.accepted) {
+          outputs.push({ text: payload.text, expected_count: challenges[index].expected_count });
+          states[index] = "done";
+        } else {
+          errors.push(`会话 ${index + 1}: 有效数字 ${payload.parsed_numbers}/${payload.minimum_numbers}`);
+          states[index] = "invalid";
+        }
+      } catch (error) {
+        errors.push(`会话 ${index + 1}: ${error.message}`);
+        states[index] = "error";
+      }
+      currentStatus = `已获得 ${outputs.length}/${challenges.length} 份有效回答`;
+      renderOneClickProgress(key, states, currentStatus);
+    }
+  } finally {
+    window.clearInterval(progressTimer);
+    byId(tool.model).disabled = false;
+    byId(tool.custom).disabled = false;
+  }
+
+  if (!outputs.length) {
+    renderOneClickProgress(key, states, "三个会话均未获得可用回答");
+    setMessage(byId("test-message"), `没有获得可分析输出。${errors[0] || ""}`, "error");
+    button.disabled = false;
+    return;
+  }
+
+  renderOneClickProgress(key, states, "回答已收齐，正在计算归因概率……");
+  const analysisResponse = await fetch("/api/analyze", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ outputs }),
+  });
+  const result = await analysisResponse.json();
+  if (analysisResponse.ok) {
+    result.cli_test = { tool: tool.label, model, received: outputs.length, requested: challenges.length, errors };
+    renderOneClickProgress(key, states, `检测完成：${outputs.length}/${challenges.length} 份有效回答进入归因`);
+    renderResult(result);
+  } else {
+    setMessage(byId("test-message"), result.error || `${tool.label} 检测失败。`, "error");
+  }
+  button.disabled = false;
+}
+
 function updateUnifiedSummary(summary) {
   state.unified = summary;
   byId("topbar-bank-count").textContent = `${summary.model_count} 个候选模型`;
@@ -330,6 +504,10 @@ byId("bank-select").addEventListener("change", (event) => selectBank(event.targe
 byId("regenerate").addEventListener("click", loadChallenges);
 byId("analyze").addEventListener("click", analyzeManual);
 byId("api-test-form").addEventListener("submit", testViaApi);
+document.querySelector('[data-test-mode="codex"]').addEventListener("click", () => { if (!oneClickLoaded.codex) loadOneClickStatus("codex"); });
+document.querySelector('[data-test-mode="claude"]').addEventListener("click", () => { if (!oneClickLoaded.claude) loadOneClickStatus("claude"); });
+byId("codex-test-form").addEventListener("submit", (event) => runOneClickTest("codex", event));
+byId("claude-test-form").addEventListener("submit", (event) => runOneClickTest("claude", event));
 byId("auto-enrollment").addEventListener("submit", enrollAutomatically);
 byId("show-create-bank").addEventListener("click", () => { byId("create-bank-form").hidden = !byId("create-bank-form").hidden; });
 byId("create-bank-form").addEventListener("submit", createBank);

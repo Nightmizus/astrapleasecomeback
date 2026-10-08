@@ -24,15 +24,26 @@
         <button class="nav-button active" data-workspace="test" type="button"><span class="nav-icon">01</span><span><strong>模型测试</strong></span></button>
         <button class="nav-button" data-workspace="library" type="button"><span class="nav-icon">02</span><span><strong>指纹库管理</strong></span></button>
       </nav>
+      <a class="nav-monitor-link" href="/monitor"><span class="nav-icon">⏱</span><span><strong>定时检测</strong><small>astra 每日 3 次</small></span></a>
     </aside>
 
     <main class="main-content">
       <section id="workspace-test" class="workspace active">
         <div class="page-header"><h1>模型测试</h1><div id="active-bank-badge" class="privacy-badge">{{ unified.model_count }} 个候选模型</div></div>
 
+        <a class="monitor-banner" href="/monitor">
+          <div class="monitor-banner-text">
+            <h2>⏱ Codex 自动定时检测</h2>
+            <p>每天 07:00 / 12:00 / 17:00（东八区）自动归因 gpt-6-astra · 历史网格 · 异常一览</p>
+          </div>
+          <span class="monitor-go">进入监控面板 →</span>
+        </a>
+
         <div class="mode-tabs" role="tablist" aria-label="测试方式">
           <button class="mode-tab active" data-test-mode="manual" type="button">手动测试</button>
           <button class="mode-tab" data-test-mode="api" type="button">API 自动测试</button>
+          <button class="mode-tab" data-test-mode="codex" type="button">Codex 一键检测</button>
+          <button class="mode-tab" data-test-mode="claude" type="button">Claude 一键检测</button>
         </div>
 
         <section id="test-manual" class="mode-panel active">
@@ -55,6 +66,44 @@
             <div class="progress-heading"><strong id="api-progress-status">准备测试</strong><span id="api-progress-count">有效 0/3 · 已尝试 0/6</span></div>
             <div class="progress-track"><i id="api-progress-fill"></i></div>
             <div id="api-progress-steps" class="progress-steps"></div>
+          </section>
+        </section>
+
+        <section id="test-codex" class="mode-panel">
+          <form id="codex-test-form" class="form-panel">
+            <div class="form-heading"><strong>本机 Codex 一键检测</strong></div>
+            <div class="form-grid two">
+              <label><span>Codex 模型</span><select id="codex-model" required></select></label>
+              <label><span>自定义模型名（可选）</span><input id="codex-model-custom" placeholder="留空则使用左侧选择的模型" autocomplete="off"></label>
+            </div>
+            <div id="codex-status" class="cli-status">正在检测本机 Codex 环境……</div>
+            <div class="form-footer">
+              <button id="codex-run" class="button primary" type="submit" disabled>一键检测（3 个独立会话）</button>
+            </div>
+          </form>
+          <section id="codex-test-progress" class="progress-panel" hidden aria-live="polite">
+            <div class="progress-heading"><strong id="codex-progress-status">准备检测</strong><span id="codex-progress-count">有效 0/3</span></div>
+            <div class="progress-track"><i id="codex-progress-fill"></i></div>
+            <div id="codex-progress-steps" class="progress-steps"></div>
+          </section>
+        </section>
+
+        <section id="test-claude" class="mode-panel">
+          <form id="claude-test-form" class="form-panel">
+            <div class="form-heading"><strong>本机 Claude Code 一键检测</strong></div>
+            <div class="form-grid two">
+              <label><span>Claude 模型</span><select id="claude-model" required></select></label>
+              <label><span>自定义模型名（可选）</span><input id="claude-model-custom" placeholder="留空则使用左侧选择的模型" autocomplete="off"></label>
+            </div>
+            <div id="claude-status" class="cli-status">正在检测本机 Claude 环境……</div>
+            <div class="form-footer">
+              <button id="claude-run" class="button primary" type="submit" disabled>一键检测（3 个独立会话）</button>
+            </div>
+          </form>
+          <section id="claude-test-progress" class="progress-panel" hidden aria-live="polite">
+            <div class="progress-heading"><strong id="claude-progress-status">准备检测</strong><span id="claude-progress-count">有效 0/3</span></div>
+            <div class="progress-track"><i id="claude-progress-fill"></i></div>
+            <div id="claude-progress-steps" class="progress-steps"></div>
           </section>
         </section>
 
